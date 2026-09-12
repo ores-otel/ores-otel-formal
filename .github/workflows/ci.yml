@@ -19,37 +19,100 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - name: Check out product model without persisted credentials
+      - name: Check out exact product-model head without persisted credentials
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Record exact-head proof inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .formal-artifacts/telemetry-pipeline
+          git rev-parse HEAD | tee .formal-artifacts/telemetry-pipeline/source-head.txt
+          sha256sum \
+            formal/fm.toml \
+            formal/telemetry_pipeline.qnt \
+            formal/telemetry_pipeline_test.qnt \
+            > .formal-artifacts/telemetry-pipeline/inputs.sha256
+
       - name: Set up Node.js 22
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22'
+
       - name: Set up Java 21 for TLC
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: '21'
+
       - name: Validate manifest shape
-        run: python3 scripts/validate_manifest.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/validate_manifest.py 2>&1 \
+            | tee .formal-artifacts/telemetry-pipeline/manifest.log
+
       - name: Check the adapter boundary fails closed
-        run: python3 -m unittest scripts/test_formal_boundary.py
-      - name: Typecheck the Quint model
-        run: >-
-          npx --yes --package=@informalsystems/quint@0.32.0 quint typecheck
-          formal/telemetry_pipeline.qnt
-      - name: Simulate the finite state machine
-        run: >-
-          npx --yes --package=@informalsystems/quint@0.32.0 quint run
-          formal/telemetry_pipeline.qnt
-          --main=telemetry_pipeline --init=init --step=step
-          --backend=typescript --max-samples=1000 --max-steps=20
-          --invariants no_secret_export pipeline_accounting redaction_phase_consistent
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest scripts/test_formal_boundary.py 2>&1 \
+            | tee .formal-artifacts/telemetry-pipeline/adapter-boundary.log
+
+      - name: Typecheck model and deterministic proof traces
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes --package=@informalsystems/quint@0.32.0 quint typecheck \
+            formal/telemetry_pipeline.qnt 2>&1 \
+            | tee .formal-artifacts/telemetry-pipeline/typecheck-model.log
+          npx --yes --package=@informalsystems/quint@0.32.0 quint typecheck \
+            formal/telemetry_pipeline_test.qnt 2>&1 \
+            | tee .formal-artifacts/telemetry-pipeline/typecheck-tests.log
+
+      - name: Run deterministic redaction and capacity proof traces
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .formal-artifacts/telemetry-pipeline/tests
+          npx --yes --package=@informalsystems/quint@0.32.0 quint test \
+            formal/telemetry_pipeline_test.qnt \
+            --main=telemetry_pipeline_test \
+            --match='.*Test$' \
+            --out-itf='.formal-artifacts/telemetry-pipeline/tests/{test}-{seq}.itf.json' 2>&1 \
+            | tee .formal-artifacts/telemetry-pipeline/tests.log
+
+      - name: Simulate invariants and require non-vacuity witnesses
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes --package=@informalsystems/quint@0.32.0 quint run \
+            formal/telemetry_pipeline.qnt \
+            --main=telemetry_pipeline --init=init --step=step \
+            --backend=typescript --max-samples=5000 --max-steps=24 \
+            --invariants no_secret_export pipeline_accounting redaction_phase_consistent \
+            --witnesses raw_secret_pending_reached redaction_reached export_reached capacity_reached 2>&1 \
+            | tee .formal-artifacts/telemetry-pipeline/simulation.log
+
       - name: Exhaustively verify all declared invariants
-        run: >-
-          npx --yes --package=@informalsystems/quint@0.32.0 quint verify
-          formal/telemetry_pipeline.qnt
-          --main=telemetry_pipeline --init=init --step=step --backend=tlc
-          --invariants no_secret_export pipeline_accounting redaction_phase_consistent
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes --package=@informalsystems/quint@0.32.0 quint verify \
+            formal/telemetry_pipeline.qnt \
+            --main=telemetry_pipeline --init=init --step=step --backend=tlc \
+            --invariants no_secret_export pipeline_accounting redaction_phase_consistent 2>&1 \
+            | tee .formal-artifacts/telemetry-pipeline/verification.log
+
+      - name: Retain exact-head formal evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ores-otel-telemetry-formal-${{ github.event.pull_request.head.sha || github.sha }}
+          path: .formal-artifacts/telemetry-pipeline
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30

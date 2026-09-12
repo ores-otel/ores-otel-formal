@@ -15,7 +15,12 @@ invariants = [
   "pipeline_accounting",
   "redaction_phase_consistent",
 ]
-witnesses = []
+witnesses = [
+  "raw_secret_pending_reached",
+  "redaction_reached",
+  "export_reached",
+  "capacity_reached",
+]
 
 [toolchain]
 quint = "0.32.0"
@@ -31,8 +36,8 @@ artifacts_dir = ".formal-artifacts"
 
 [simulation]
 backend = "typescript"
-max_samples = 1000
-max_steps = 20
+max_samples = 5000
+max_steps = 24
 
 [verification]
 backend = "tlc"
