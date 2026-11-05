@@ -1,0 +1,26 @@
+// Pure AttoLang projection of the finite telemetry pipeline model.
+// This is a reference predicate; no AttoLang compiler/backend execution is claimed.
+define module telemetry_policy as
+  pub fnc accounting_valid(int ingested, int redacted,
+                           int exported, bool raw_pending): bool {
+    return ingested >= 0 && ingested <= 3 &&
+      redacted >= 0 && redacted <= ingested &&
+      exported >= 0 && exported <= redacted &&
+      (raw_pending && ingested == redacted + 1 ||
+       !raw_pending && ingested == redacted);
+  }
+
+  pub fnc export_permitted(int ingested, int redacted,
+                           int exported, bool raw_pending): bool {
+    return accounting_valid(ingested, redacted, exported, raw_pending) &&
+      redacted > exported;
+  }
+
+  pub fnc self_check(): bool {
+    return !export_permitted(1,0,0,true) &&
+      export_permitted(1,1,0,false) &&
+      export_permitted(2,1,0,true) &&
+      !export_permitted(2,1,1,true) &&
+      !export_permitted(1,0,1,true);
+  }
+end
