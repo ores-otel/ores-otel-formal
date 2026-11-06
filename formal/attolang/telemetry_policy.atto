@@ -1,0 +1,13 @@
+// Pure AttoLang policy oracle; Quint remains the authoritative abstract model.
+define module telemetry_policy as
+  pub fnc may_export(bool accepting, bool redacted,
+                     bool raw_secret_pending): bool {
+    return accepting && redacted && !raw_secret_pending;
+  }
+  pub fnc self_check(): bool {
+    return may_export(true,true,false) &&
+      !may_export(true,false,false) &&
+      !may_export(true,true,true) &&
+      !may_export(false,true,false);
+  }
+end
