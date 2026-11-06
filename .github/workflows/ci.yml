@@ -35,6 +35,8 @@ jobs:
             formal/fm.toml \
             formal/telemetry_pipeline.qnt \
             formal/telemetry_pipeline_test.qnt \
+            src/telemetry_policy.atto \
+            scripts/check_attolang_telemetry_policy.py \
             > .formal-artifacts/telemetry-pipeline/inputs.sha256
 
       - name: Set up Node.js 22
@@ -54,6 +56,13 @@ jobs:
           set -euo pipefail
           python3 scripts/validate_manifest.py 2>&1 \
             | tee .formal-artifacts/telemetry-pipeline/manifest.log
+
+      - name: Exhaustively check abstract AttoLang export admission policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/check_attolang_telemetry_policy.py 2>&1 \
+            | tee .formal-artifacts/telemetry-pipeline/attolang-policy.log
 
       - name: Check the adapter boundary fails closed
         shell: bash
